@@ -1,0 +1,164 @@
+name: Build React Native Shorts Blocker
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: Set up Java 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+      
+    - name: Cache Gradle packages
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+          
+    - name: Install dependencies
+      run: npm install
+      
+    - name: Create Android project structure
+      run: |
+        mkdir -p android/app/src/main/java/com/shortsblockerreactnative
+        mkdir -p android/app/src/main/res/values
+        mkdir -p android/app/src/main/res/layout
+        
+    - name: Generate React Native Android files
+      run: |
+        npx react-native init ShortsBlockerTemp --template react-native-template-typescript
+        cp -r ShortsBlockerTemp/android/* android/ || true
+        rm -rf ShortsBlockerTemp
+        
+    - name: Build Android APK
+      run: |
+        cd android
+        chmod +x ./gradlew
+        ./gradlew assembleDebug --stacktrace
+        
+    - name: Upload Android APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: shorts-blocker-android-apk
+        path: android/app/build/outputs/apk/debug/app-debug.apk
+        retention-days: 30
+        
+    - name: Build Android Release APK
+      run: |
+        cd android
+        ./gradlew assembleRelease
+      continue-on-error: true
+        
+    - name: Upload Android Release APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: shorts-blocker-android-release-apk
+        path: android/app/build/outputs/apk/release/app-release.apk
+        retention-days: 30
+      if: always()
+
+  build-ios:
+    runs-on: macos-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm install
+      
+    - name: Install CocoaPods
+      run: |
+        cd ios
+        pod install
+        
+    - name: Build iOS App
+      run: |
+        cd ios
+        xcodebuild -workspace ShortsBlockerReactNative.xcworkspace \
+                   -scheme ShortsBlockerReactNative \
+                   -configuration Debug \
+                   -destination 'platform=iOS Simulator,name=iPhone 14' \
+                   build
+      continue-on-error: true
+        
+    - name: Upload iOS Build
+      uses: actions/upload-artifact@v4
+      with:
+        name: shorts-blocker-ios-build
+        path: ios/build/
+        retention-days: 30
+      if: always()
+
+  build-expo:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: Setup Expo CLI
+      run: npm install -g @expo/cli eas-cli
+      
+    - name: Install dependencies
+      run: npm install
+      
+    - name: Create Expo project
+      run: |
+        npx create-expo-app ShortsBlockerExpo --template blank-typescript
+        cp -r src/* ShortsBlockerExpo/src/ || true
+        cp App.js ShortsBlockerExpo/ || true
+        cp package.json ShortsBlockerExpo/ || true
+        
+    - name: Build Expo APK
+      run: |
+        cd ShortsBlockerExpo
+        eas build --platform android --profile preview --non-interactive
+      continue-on-error: true
+      env:
+        EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        
+    - name: Upload Expo APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: shorts-blocker-expo-apk
+        path: ShortsBlockerExpo/
+        retention-days: 30
+      if: always()
